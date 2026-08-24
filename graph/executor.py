@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from graph.graph import Graph, GraphValidationError
@@ -24,6 +24,9 @@ class GraphExecutor:
         self,
         context: ExecutionContext,
         on_node_start: Callable[[str], None] | None = None,
+        on_node_started: Callable[[str], Awaitable[None]] | None = None,
+        on_node_completed: Callable[[str, ExecutionContext], Awaitable[None]]
+        | None = None,
     ) -> Any:
         self.graph.validate()
 
@@ -33,9 +36,13 @@ class GraphExecutor:
             node = self.graph.nodes[current]
             if on_node_start is not None:
                 on_node_start(node.id)
+            if on_node_started is not None:
+                await on_node_started(node.id)
             result = await node.execute(context)
             context.node_outputs[node.id] = result.output
             last_output = result.output
+            if on_node_completed is not None:
+                await on_node_completed(node.id, context)
 
             if result.next_node is not None:
                 if result.next_node not in self.graph.nodes:

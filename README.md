@@ -24,6 +24,10 @@ AgentFlow 是一个不依赖 LangGraph/LangChain 的轻量级 Agent Runtime。�
   - Bounded Queue / Global Concurrency / Backpressure
   - Pending 与 Running Task Cancellation / Task Timeout
 
+- [x] Milestone 4：Persistence
+  - SQLite / TaskRepository / CheckpointRepository / EventRepository
+  - Task 状态持久化 / 每个成功 Node 后持久化 Checkpoint
+
 ## 环境
 
 ```bash

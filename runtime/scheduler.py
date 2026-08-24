@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,6 +11,9 @@ from runtime.task import AgentTask, TERMINAL_TASK_STATUSES, TaskStatus
 
 
 TaskRunner = Callable[[ExecutionContext], Awaitable[Any]]
+TaskStateCallback = Callable[[AgentTask], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,7 @@ class _WorkItem:
     task: AgentTask
     context: ExecutionContext
     runner: TaskRunner
+    state_callback: TaskStateCallback | None
 
 
 class Scheduler:
@@ -36,6 +41,8 @@ class Scheduler:
         self._workers: list[asyncio.Task[None]] = []
         self._running: dict[str, asyncio.Task[Any]] = {}
         self._known: dict[str, AgentTask] = {}
+        self._state_callbacks: dict[str, TaskStateCallback] = {}
+        self._finalizers: set[asyncio.Task[None]] = set()
         self._started = False
         self._accepting = False
 
@@ -62,31 +69,51 @@ class Scheduler:
         task: AgentTask,
         context: ExecutionContext,
         runner: TaskRunner,
+        state_callback: TaskStateCallback | None = None,
     ) -> None:
         if not self._started:
             await self.start()
         if not self._accepting:
             raise TaskRejected("scheduler is not accepting tasks")
         try:
-            self._queue.put_nowait(_WorkItem(task=task, context=context, runner=runner))
+            self._queue.put_nowait(
+                _WorkItem(
+                    task=task,
+                    context=context,
+                    runner=runner,
+                    state_callback=state_callback,
+                )
+            )
         except asyncio.QueueFull:
             raise TaskRejected("scheduler queue is full") from None
         self._known[task.task_id] = task
+        if state_callback is not None:
+            self._state_callbacks[task.task_id] = state_callback
 
     def cancel(self, task_id: str) -> bool:
         task = self._known.get(task_id)
         if task is None or task.status in TERMINAL_TASK_STATUSES:
             return False
 
+        was_running = task.status is TaskStatus.RUNNING
         task.status = TaskStatus.CANCELLED
         task.error = f"{TaskCancelledError.__name__}: task was cancelled"
 
         execution = self._running.get(task_id)
         if execution is not None:
             execution.cancel()
-        else:
+        elif not was_running:
             task.completed_at = datetime.now(UTC)
-            task._done.set()
+            callback = self._state_callbacks.get(task_id)
+            if callback is None:
+                task._done.set()
+            else:
+                finalizer = asyncio.create_task(
+                    self._persist_pending_cancellation(task, callback),
+                    name=f"agentflow-cancel-{task.task_id}",
+                )
+                self._finalizers.add(finalizer)
+                finalizer.add_done_callback(self._finalizers.discard)
         return True
 
     async def shutdown(self, cancel_tasks: bool = True) -> None:
@@ -99,6 +126,8 @@ class Scheduler:
                 self.cancel(task_id)
 
         await self._queue.join()
+        if self._finalizers:
+            await asyncio.gather(*self._finalizers)
         for _ in self._workers:
             await self._queue.put(None)
         await asyncio.gather(*self._workers)
@@ -128,12 +157,17 @@ class Scheduler:
 
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.now(UTC)
-        execution = asyncio.create_task(
-            item.runner(item.context), name=f"agentflow-task-{task.task_id}"
-        )
-        self._running[task.task_id] = execution
+        execution: asyncio.Task[Any] | None = None
 
         try:
+            if item.state_callback is not None:
+                await item.state_callback(task)
+            if task.status is TaskStatus.CANCELLED:
+                raise asyncio.CancelledError
+            execution = asyncio.create_task(
+                item.runner(item.context), name=f"agentflow-task-{task.task_id}"
+            )
+            self._running[task.task_id] = execution
             if task.timeout_seconds is None:
                 task.output = await execution
             else:
@@ -167,4 +201,28 @@ class Scheduler:
             self._running.pop(task.task_id, None)
             if task.completed_at is None:
                 task.completed_at = datetime.now(UTC)
+            try:
+                if item.state_callback is not None:
+                    await item.state_callback(task)
+            except Exception:
+                logger.exception(
+                    "failed to persist terminal task state",
+                    extra={"task_id": task.task_id, "status": task.status.value},
+                )
+            finally:
+                task._done.set()
+
+    async def _persist_pending_cancellation(
+        self,
+        task: AgentTask,
+        callback: TaskStateCallback,
+    ) -> None:
+        try:
+            await callback(task)
+        except Exception:
+            logger.exception(
+                "failed to persist cancelled task state",
+                extra={"task_id": task.task_id},
+            )
+        finally:
             task._done.set()
