@@ -83,14 +83,20 @@ async def test_parallel_node_runs_children_concurrently():
 
 
 async def test_parallel_node_fail_fast_cancels_siblings():
-    sibling_finished = False
+    sibling_cancelled = asyncio.Event()
+    sibling_started = asyncio.Event()
 
     async def bad(context):
+        await sibling_started.wait()
         raise RuntimeError("boom")
 
     async def slow(context):
-        await asyncio.sleep(30)
-        sibling_finished = True
+        sibling_started.set()
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            sibling_cancelled.set()
+            raise
 
     node = ParallelNode(
         id="p",
@@ -101,7 +107,7 @@ async def test_parallel_node_fail_fast_cancels_siblings():
     )
     with pytest.raises(RuntimeError, match="boom"):
         await node.execute(ExecutionContext(task_id="t"))
-    assert sibling_finished is False
+    assert sibling_cancelled.is_set()
 
 
 def test_parallel_node_rejects_duplicate_child_ids():

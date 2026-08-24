@@ -4,7 +4,7 @@ from typing import Any
 
 @dataclass
 class ExecutionContext:
-    """保存一次 Agent 执行过程中的状态（DSEIGN.md §7）。
+    """保存一次 Agent 执行过程中的状态（DESIGN.md §7）。
 
     所有 Agent State 必须通过 ExecutionContext 显式传递，禁止全局变量：
 

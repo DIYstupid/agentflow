@@ -6,6 +6,7 @@ class ToolLimiter:
 
     def __init__(self) -> None:
         self._semaphores: dict[str, asyncio.Semaphore] = {}
+        self._limits: dict[str, int] = {}
 
     def acquire(self, tool_name: str, max_concurrency: int) -> asyncio.Semaphore:
         if max_concurrency < 1:
@@ -14,4 +15,10 @@ class ToolLimiter:
         if sem is None:
             sem = asyncio.Semaphore(max_concurrency)
             self._semaphores[tool_name] = sem
+            self._limits[tool_name] = max_concurrency
+        elif self._limits[tool_name] != max_concurrency:
+            raise ValueError(
+                f"tool {tool_name!r} concurrency limit is already "
+                f"{self._limits[tool_name]}, got {max_concurrency}"
+            )
         return sem

@@ -33,12 +33,17 @@ class ToolExecutor:
         async with self.limiter.acquire(tool_name, tool.max_concurrency):
             for attempt in range(tool.max_retries + 1):
                 try:
-                    async with asyncio.timeout(tool.timeout):
+                    async with asyncio.timeout(tool.timeout) as timeout_scope:
                         return await tool.execute(arguments)
                 except TimeoutError:
-                    raise ToolTimeout(
-                        f"tool {tool.name!r} timed out after {tool.timeout}s"
-                    ) from None
+                    # asyncio.timeout() 和工具/下游 SDK 都可能抛 TimeoutError。
+                    # 只有当前 timeout scope 确实到期时才能转换为 ToolTimeout；
+                    # 工具自身的 TimeoutError 必须保留，避免错误分类。
+                    if timeout_scope.expired():
+                        raise ToolTimeout(
+                            f"tool {tool.name!r} timed out after {tool.timeout}s"
+                        ) from None
+                    raise
                 except RetryableToolError:
                     if attempt >= tool.max_retries:
                         raise

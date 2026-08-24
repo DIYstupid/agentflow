@@ -1,12 +1,12 @@
 # AgentFlow
 
-高并发可恢复 Agent Runtime。不依赖 LangGraph/LangChain 的轻量级 Agent 执行引擎，支持 DAG 工作流、Tool Calling、任务调度、超时重试、Checkpoint、Crash Recovery、SSE 事件流与基础可观测性。
+AgentFlow 是一个不依赖 LangGraph/LangChain 的轻量级 Agent Runtime。当前已完成 DAG 工作流和 Tool Runtime；任务调度、持久化、Crash Recovery、SSE 与可观测性将按后续 Milestone 实现。
 
 - 语言：Python 3.12+
 - 框架：FastAPI + asyncio
 - 存储：SQLite（V1）
 
-详细设计：`DSEIGN.md`。
+详细设计：`DESIGN.md`。
 
 ## 进度
 

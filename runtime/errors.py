@@ -1,4 +1,4 @@
-"""AgentFlow 统一错误层级（DSEIGN.md §17）。
+"""AgentFlow 统一错误层级（DESIGN.md §17）。
 
 只有 RetryableToolError 允许自动 Retry；参数错误等 NonRetryable 直接失败。
 """

@@ -25,7 +25,7 @@ class Graph:
         2. Node ID 与 dict key 一致（重复 ID 在此暴露）
         3. edge 的 source / target 是否存在
         4. ConditionNode branch 目标是否存在
-        5. 非 Condition Node 至多一条出边（分支必须走 ConditionNode）
+        5. Condition Node 不得同时声明普通出边；其他 Node 至多一条出边
         6. 从 start node 可达性：所有 Node 必须可达
         7. 不存在 cycle（V1 为 DAG）
         """
@@ -63,10 +63,18 @@ class Graph:
                             f"targets missing node {target!r}"
                         )
 
-        # 5. 非 Condition Node 至多一条出边
+        # 5. ConditionNode 只能通过 branches 路由；普通 Node 只能顺序执行。
+        # 如果同时接受 ConditionNode 的 branches 和普通 edges，校验器会把
+        # edge target 判定为可达，但执行器永远优先使用 next_node，导致该边
+        # 实际不可执行。
         for node_id, node in self.nodes.items():
             out_edges = [e for e in self.edges if e.source == node_id]
-            if not isinstance(node, ConditionNode) and len(out_edges) > 1:
+            if isinstance(node, ConditionNode) and out_edges:
+                raise GraphValidationError(
+                    f"condition node {node_id!r} must route through branches only; "
+                    "ordinary outgoing edges are not allowed"
+                )
+            if len(out_edges) > 1:
                 raise GraphValidationError(
                     f"node {node_id!r} has {len(out_edges)} outgoing edges; "
                     f"use ConditionNode for branching"
@@ -78,11 +86,9 @@ class Graph:
 
         def successors(node_id: str) -> list[str]:
             node = self.nodes[node_id]
-            targets: list[str] = []
             if isinstance(node, ConditionNode):
-                targets.extend(node.branches.values())
-            targets.extend(e.target for e in self.edges if e.source == node_id)
-            return targets
+                return list(node.branches.values())
+            return [e.target for e in self.edges if e.source == node_id]
 
         def dfs(node_id: str, path: list[str]) -> None:
             state[node_id] = VISITING

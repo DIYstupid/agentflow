@@ -46,6 +46,21 @@ async def test_tool_timeout():
     assert tool.calls == 1
 
 
+class NativeTimeoutTool(Tool):
+    name = "native_timeout"
+    timeout = 5.0
+    max_retries = 0
+
+    async def execute(self, arguments):
+        raise TimeoutError("downstream timeout")
+
+
+async def test_tool_native_timeout_error_is_not_misclassified():
+    executor = make_executor(NativeTimeoutTool())
+    with pytest.raises(TimeoutError, match="downstream timeout"):
+        await executor.execute("native_timeout", {})
+
+
 class FlakyTool(Tool):
     name = "flaky"
     timeout = 5.0
@@ -173,3 +188,10 @@ async def test_per_tool_limiter_isolation():
     assert limiter.acquire("count_a", a.max_concurrency) is not limiter.acquire(
         "count_b", b.max_concurrency
     )
+
+
+def test_limiter_rejects_changed_limit_for_same_tool():
+    limiter = ToolLimiter()
+    limiter.acquire("same", 2)
+    with pytest.raises(ValueError, match="already 2"):
+        limiter.acquire("same", 3)

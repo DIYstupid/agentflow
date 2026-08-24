@@ -88,6 +88,26 @@ def test_cycle_detected():
         ).validate()
 
 
+def test_condition_node_rejects_ordinary_outgoing_edge():
+    async def pick(context):
+        return "yes"
+
+    graph = make_graph(
+        nodes={
+            "condition": ConditionNode(
+                id="condition", condition=pick, branches={"yes": "selected"}
+            ),
+            "selected": make_node("selected"),
+            "phantom": make_node("phantom"),
+        },
+        edges=[Edge("condition", "phantom")],
+        start="condition",
+    )
+
+    with pytest.raises(GraphValidationError, match="branches only"):
+        graph.validate()
+
+
 async def test_condition_branch():
     log = []
 
