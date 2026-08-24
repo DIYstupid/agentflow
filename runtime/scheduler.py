@@ -22,6 +22,7 @@ class _WorkItem:
     context: ExecutionContext
     runner: TaskRunner
     state_callback: TaskStateCallback | None
+    execution_timeout: float | None
 
 
 class Scheduler:
@@ -70,22 +71,31 @@ class Scheduler:
         context: ExecutionContext,
         runner: TaskRunner,
         state_callback: TaskStateCallback | None = None,
+        wait_for_capacity: bool = False,
+        execution_timeout: float | None = None,
     ) -> None:
         if not self._started:
             await self.start()
         if not self._accepting:
             raise TaskRejected("scheduler is not accepting tasks")
-        try:
-            self._queue.put_nowait(
-                _WorkItem(
-                    task=task,
-                    context=context,
-                    runner=runner,
-                    state_callback=state_callback,
-                )
+        item = _WorkItem(
+            task=task,
+            context=context,
+            runner=runner,
+            state_callback=state_callback,
+            execution_timeout=(
+                task.timeout_seconds
+                if execution_timeout is None
+                else execution_timeout
             )
-        except asyncio.QueueFull:
-            raise TaskRejected("scheduler queue is full") from None
+        )
+        if wait_for_capacity:
+            await self._queue.put(item)
+        else:
+            try:
+                self._queue.put_nowait(item)
+            except asyncio.QueueFull:
+                raise TaskRejected("scheduler queue is full") from None
         self._known[task.task_id] = task
         if state_callback is not None:
             self._state_callbacks[task.task_id] = state_callback
@@ -156,7 +166,8 @@ class Scheduler:
             return
 
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.now(UTC)
+        if task.started_at is None:
+            task.started_at = datetime.now(UTC)
         execution: asyncio.Task[Any] | None = None
 
         try:
@@ -168,17 +179,17 @@ class Scheduler:
                 item.runner(item.context), name=f"agentflow-task-{task.task_id}"
             )
             self._running[task.task_id] = execution
-            if task.timeout_seconds is None:
+            if item.execution_timeout is None:
                 task.output = await execution
             else:
                 try:
-                    async with asyncio.timeout(task.timeout_seconds) as timeout_scope:
+                    async with asyncio.timeout(item.execution_timeout) as timeout_scope:
                         task.output = await execution
                 except TimeoutError:
                     if not timeout_scope.expired():
                         raise
                     raise TaskTimeoutError(
-                        f"task exceeded {task.timeout_seconds}s timeout"
+                        f"task exceeded {item.execution_timeout}s execution timeout"
                     ) from None
         except TaskTimeoutError as error:
             task.status = TaskStatus.FAILED

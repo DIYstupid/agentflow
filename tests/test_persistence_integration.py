@@ -68,7 +68,7 @@ async def test_next_node_waits_until_checkpoint_succeeds():
     second_started = asyncio.Event()
 
     class BlockingCheckpointRepository:
-        async def save(self, task_id, node_id, context):
+        async def save(self, task_id, node_id, context, next_node=None):
             if node_id == "a":
                 checkpoint_started.set()
                 await allow_checkpoint.wait()
@@ -99,7 +99,7 @@ async def test_checkpoint_failure_stops_graph():
     second_executed = False
 
     class FailingCheckpointRepository:
-        async def save(self, task_id, node_id, context):
+        async def save(self, task_id, node_id, context, next_node=None):
             raise RuntimeError("checkpoint unavailable")
 
     async def first(context):

@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
+    next_node TEXT,
     context_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
@@ -64,7 +65,17 @@ class Database:
         if self.path != ":memory:":
             await self._connection.execute("PRAGMA journal_mode = WAL")
         await self._connection.executescript(SCHEMA)
+        await self._migrate()
         await self._connection.commit()
+
+    async def _migrate(self) -> None:
+        """Apply additive V1 migrations to databases created by earlier milestones."""
+        connection = self._require_connection()
+        cursor = await connection.execute("PRAGMA table_info(checkpoints)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        await cursor.close()
+        if "next_node" not in columns:
+            await connection.execute("ALTER TABLE checkpoints ADD COLUMN next_node TEXT")
 
     async def close(self) -> None:
         if self._connection is None:

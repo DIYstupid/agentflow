@@ -28,6 +28,10 @@ AgentFlow 是一个不依赖 LangGraph/LangChain 的轻量级 Agent Runtime。�
   - SQLite / TaskRepository / CheckpointRepository / EventRepository
   - Task 状态持久化 / 每个成功 Node 后持久化 Checkpoint
 
+- [x] Milestone 5：Recovery
+  - 启动扫描 RUNNING Task / 加载最新 Checkpoint
+  - 从下一 Node 恢复 / At-least-once Node Execution
+
 ## 环境
 
 ```bash

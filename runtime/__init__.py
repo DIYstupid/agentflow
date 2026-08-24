@@ -2,7 +2,13 @@
 
 from typing import Any
 
-__all__ = ["AgentTask", "TaskStatus", "Scheduler", "TaskManager"]
+__all__ = [
+    "AgentTask",
+    "TaskStatus",
+    "Scheduler",
+    "TaskManager",
+    "RecoveryManager",
+]
 
 
 def __getattr__(name: str) -> Any:
@@ -15,6 +21,10 @@ def __getattr__(name: str) -> Any:
         from runtime.scheduler import Scheduler
 
         return Scheduler
+    if name == "RecoveryManager":
+        from runtime.recovery import RecoveryManager
+
+        return RecoveryManager
     if name in {"AgentTask", "TaskStatus"}:
         from runtime.task import AgentTask, TaskStatus
 

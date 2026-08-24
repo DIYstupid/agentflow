@@ -50,3 +50,7 @@ class TaskTimeoutError(AgentFlowError):
 
 class TaskRejected(AgentFlowError):
     """Scheduler 有界队列已满或已停止接收任务。"""
+
+
+class RecoveryError(AgentFlowError):
+    """持久化任务无法安全恢复。"""

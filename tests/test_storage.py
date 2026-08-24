@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from runtime.context import ExecutionContext
@@ -115,3 +116,29 @@ async def test_database_context_manager_and_cascade_delete(tmp_path):
         assert await checkpoints.latest(task.task_id) is None
 
     assert path.exists()
+
+
+async def test_database_migrates_m4_checkpoint_schema(tmp_path):
+    path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            node_id TEXT NOT NULL,
+            context_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    await database.initialize()
+    try:
+        columns = await database.fetch_all("PRAGMA table_info(checkpoints)")
+        assert "next_node" in {row["name"] for row in columns}
+    finally:
+        await database.close()

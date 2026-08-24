@@ -4,7 +4,7 @@ from graph.executor import GraphExecutor
 from graph.graph import Graph
 from runtime.context import ExecutionContext
 from runtime.scheduler import Scheduler
-from runtime.task import AgentTask
+from runtime.task import AgentTask, TaskStatus
 from storage.checkpoint_repository import CheckpointRepository
 from storage.task_repository import TaskRepository
 
@@ -51,18 +51,20 @@ class TaskManager:
                 await self.task_repository.update(task)
 
         async def save_checkpoint(
-            node_id: str, execution_context: ExecutionContext
+            node_id: str,
+            next_node: str | None,
+            execution_context: ExecutionContext,
         ) -> None:
             if self.checkpoint_repository is not None:
                 await self.checkpoint_repository.save(
-                    task.task_id, node_id, execution_context
+                    task.task_id, node_id, execution_context, next_node
                 )
 
         async def run(execution_context: ExecutionContext) -> Any:
             return await executor.execute(
                 execution_context,
                 on_node_started=mark_node_started,
-                on_node_completed=save_checkpoint,
+                on_checkpoint=save_checkpoint,
             )
 
         self._tasks[task.task_id] = task
@@ -82,6 +84,84 @@ class TaskManager:
             if self.task_repository is not None:
                 await self.task_repository.delete(task.task_id)
             raise
+        return task
+
+    async def resume(
+        self,
+        task: AgentTask,
+        graph: Graph,
+        context: ExecutionContext,
+        start_node: str,
+        execution_timeout: float | None = None,
+    ) -> AgentTask:
+        """Re-admit a persisted RUNNING task without creating a new database row."""
+        graph.validate()
+        if task.graph_id != graph.graph_id:
+            raise ValueError(
+                f"task graph {task.graph_id!r} does not match {graph.graph_id!r}"
+            )
+        if context.task_id != task.task_id:
+            raise ValueError("checkpoint context belongs to a different task")
+        if start_node not in graph.nodes:
+            raise ValueError(f"resume node {start_node!r} does not exist")
+        if task.task_id in self._tasks:
+            raise ValueError(f"task {task.task_id!r} is already managed")
+
+        executor = GraphExecutor(graph)
+
+        async def mark_node_started(node_id: str) -> None:
+            task.current_node = node_id
+            if self.task_repository is not None:
+                await self.task_repository.update(task)
+
+        async def save_checkpoint(
+            node_id: str,
+            next_node: str | None,
+            execution_context: ExecutionContext,
+        ) -> None:
+            if self.checkpoint_repository is not None:
+                await self.checkpoint_repository.save(
+                    task.task_id, node_id, execution_context, next_node
+                )
+
+        async def run(execution_context: ExecutionContext) -> Any:
+            return await executor.execute(
+                execution_context,
+                on_node_started=mark_node_started,
+                on_checkpoint=save_checkpoint,
+                start_node=start_node,
+            )
+
+        task.status = TaskStatus.RUNNING
+        task.completed_at = None
+        task.error = None
+        self._tasks[task.task_id] = task
+        self._contexts[task.task_id] = context
+        try:
+            await self.scheduler.submit(
+                task,
+                context,
+                run,
+                state_callback=self.task_repository.update
+                if self.task_repository is not None
+                else None,
+                wait_for_capacity=True,
+                execution_timeout=execution_timeout,
+            )
+        except BaseException:
+            self._tasks.pop(task.task_id, None)
+            self._contexts.pop(task.task_id, None)
+            raise
+        return task
+
+    def attach_completed(
+        self, task: AgentTask, context: ExecutionContext
+    ) -> AgentTask:
+        if task.task_id in self._tasks:
+            raise ValueError(f"task {task.task_id!r} is already managed")
+        self._tasks[task.task_id] = task
+        self._contexts[task.task_id] = context
+        task._done.set()
         return task
 
     def get(self, task_id: str) -> AgentTask | None:

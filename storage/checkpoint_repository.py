@@ -12,6 +12,7 @@ class Checkpoint:
     id: int
     task_id: str
     node_id: str
+    next_node: str | None
     context: ExecutionContext
     created_at: datetime
 
@@ -25,6 +26,7 @@ class CheckpointRepository:
         task_id: str,
         node_id: str,
         context: ExecutionContext,
+        next_node: str | None = None,
     ) -> Checkpoint:
         created_at = datetime.now(UTC)
         context_json = json.dumps(
@@ -38,15 +40,17 @@ class CheckpointRepository:
         )
         checkpoint_id = await self.database.execute(
             """
-            INSERT INTO checkpoints (task_id, node_id, context_json, created_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO checkpoints (
+                task_id, node_id, next_node, context_json, created_at
+            ) VALUES (?, ?, ?, ?, ?)
             """,
-            (task_id, node_id, context_json, created_at.isoformat()),
+            (task_id, node_id, next_node, context_json, created_at.isoformat()),
         )
         return Checkpoint(
             id=checkpoint_id,
             task_id=task_id,
             node_id=node_id,
+            next_node=next_node,
             context=self._copy_context(context),
             created_at=created_at,
         )
@@ -96,6 +100,7 @@ class CheckpointRepository:
             id=row["id"],
             task_id=row["task_id"],
             node_id=row["node_id"],
+            next_node=row["next_node"],
             context=context,
             created_at=datetime.fromisoformat(row["created_at"]),
         )
