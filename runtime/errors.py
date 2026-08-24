@@ -46,3 +46,7 @@ class TaskCancelledError(AgentFlowError):
 
 class TaskTimeoutError(AgentFlowError):
     """任务超时（Milestone 3+ 使用）。"""
+
+
+class TaskRejected(AgentFlowError):
+    """Scheduler 有界队列已满或已停止接收任务。"""

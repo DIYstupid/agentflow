@@ -1,4 +1,4 @@
-"""Milestone 1 Demo（DSEIGN.md §47）：
+"""Milestone 1 Demo（DESIGN.md §47）：
 
     START
       ↓

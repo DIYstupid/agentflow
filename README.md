@@ -19,6 +19,11 @@ AgentFlow 是一个不依赖 LangGraph/LangChain 的轻量级 Agent Runtime。�
   - RetryPolicy（Exponential Backoff）、ToolLimiter（Per-Tool Semaphore）
   - Mock：EchoTool / SleepTool / FailTool / RandomFailTool
 
+- [x] Milestone 3：Task Runtime
+  - AgentTask / TaskManager / Scheduler
+  - Bounded Queue / Global Concurrency / Backpressure
+  - Pending 与 Running Task Cancellation / Task Timeout
+
 ## 环境
 
 ```bash

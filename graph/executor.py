@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 from graph.graph import Graph, GraphValidationError
@@ -19,13 +20,19 @@ class GraphExecutor:
     def __init__(self, graph: Graph) -> None:
         self.graph = graph
 
-    async def execute(self, context: ExecutionContext) -> Any:
+    async def execute(
+        self,
+        context: ExecutionContext,
+        on_node_start: Callable[[str], None] | None = None,
+    ) -> Any:
         self.graph.validate()
 
         current: str | None = self.graph.start_node
         last_output: Any = None
         while current is not None:
             node = self.graph.nodes[current]
+            if on_node_start is not None:
+                on_node_start(node.id)
             result = await node.execute(context)
             context.node_outputs[node.id] = result.output
             last_output = result.output
