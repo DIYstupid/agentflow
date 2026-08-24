@@ -14,6 +14,11 @@
   - ExecutionContext / Node / FunctionNode / ConditionNode / ParallelNode
   - Graph / Edge / Graph Validation / GraphExecutor
 
+- [x] Milestone 2：Tool Runtime
+  - Tool / ToolRegistry / ToolExecutor（Limiter → Timeout → Retry）
+  - RetryPolicy（Exponential Backoff）、ToolLimiter（Per-Tool Semaphore）
+  - Mock：EchoTool / SleepTool / FailTool / RandomFailTool
+
 ## 环境
 
 ```bash

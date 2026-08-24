@@ -2,10 +2,11 @@ from dataclasses import dataclass, field
 
 from graph.edge import Edge
 from graph.node import ConditionNode, Node
+from runtime.errors import GraphError
 
 
-class GraphValidationError(ValueError):
-    """Graph 校验失败（§8）。"""
+class GraphValidationError(GraphError):
+    """Graph 校验失败（§8 / §17）。"""
 
 
 @dataclass

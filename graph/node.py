@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from runtime.context import ExecutionContext
+from runtime.errors import GraphError
 
 
 @dataclass
@@ -60,7 +61,7 @@ class ConditionNode(Node):
     async def execute(self, context: ExecutionContext) -> NodeResult:
         key = await self.condition(context)
         if key not in self.branches:
-            raise ValueError(
+            raise GraphError(
                 f"condition node {self.id!r} returned unknown branch {key!r}; "
                 f"expected one of {sorted(self.branches)}"
             )
@@ -74,7 +75,7 @@ class ParallelNode(Node):
         super().__init__(id)
         child_ids = [child.id for child in children]
         if len(child_ids) != len(set(child_ids)):
-            raise ValueError(f"parallel node {id!r} has duplicate child ids: {child_ids}")
+            raise GraphError(f"parallel node {id!r} has duplicate child ids: {child_ids}")
         self.children = children
 
     async def execute(self, context: ExecutionContext) -> NodeResult:

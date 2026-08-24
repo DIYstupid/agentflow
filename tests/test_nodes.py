@@ -4,6 +4,8 @@ import pytest
 
 from graph.node import ConditionNode, FunctionNode, NodeResult, ParallelNode
 from runtime.context import ExecutionContext
+from runtime.errors import GraphError
+
 
 
 async def test_function_node_executes_handler():
@@ -42,7 +44,7 @@ async def test_condition_node_unknown_branch_raises():
     node = ConditionNode(
         id="check", condition=condition, branches={"yes": "search", "no": "finish"}
     )
-    with pytest.raises(ValueError, match="maybe"):
+    with pytest.raises(GraphError, match="maybe"):
         await node.execute(ExecutionContext(task_id="t"))
 
 
@@ -103,7 +105,7 @@ async def test_parallel_node_fail_fast_cancels_siblings():
 
 
 def test_parallel_node_rejects_duplicate_child_ids():
-    with pytest.raises(ValueError, match="duplicate"):
+    with pytest.raises(GraphError, match="duplicate"):
         ParallelNode(
             id="p",
             children=[
