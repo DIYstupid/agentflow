@@ -29,6 +29,7 @@ class GraphExecutor:
         | None = None,
         on_checkpoint: Callable[[str, str | None, ExecutionContext], Awaitable[None]]
         | None = None,
+        on_node_failed: Callable[[str, Exception], Awaitable[None]] | None = None,
         start_node: str | None = None,
     ) -> Any:
         self.graph.validate()
@@ -39,18 +40,23 @@ class GraphExecutor:
         last_output: Any = None
         while current is not None:
             node = self.graph.nodes[current]
-            if on_node_start is not None:
-                on_node_start(node.id)
-            if on_node_started is not None:
-                await on_node_started(node.id)
-            result = await node.execute(context)
-            context.node_outputs[node.id] = result.output
-            last_output = result.output
-            next_node = self._resolve_next(node.id, result.next_node)
-            if on_node_completed is not None:
-                await on_node_completed(node.id, context)
-            if on_checkpoint is not None:
-                await on_checkpoint(node.id, next_node, context)
+            try:
+                if on_node_start is not None:
+                    on_node_start(node.id)
+                if on_node_started is not None:
+                    await on_node_started(node.id)
+                result = await node.execute(context)
+                context.node_outputs[node.id] = result.output
+                last_output = result.output
+                next_node = self._resolve_next(node.id, result.next_node)
+                if on_node_completed is not None:
+                    await on_node_completed(node.id, context)
+                if on_checkpoint is not None:
+                    await on_checkpoint(node.id, next_node, context)
+            except Exception as error:
+                if on_node_failed is not None:
+                    await on_node_failed(node.id, error)
+                raise
             current = next_node
 
         return last_output

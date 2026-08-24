@@ -32,6 +32,11 @@ AgentFlow 是一个不依赖 LangGraph/LangChain 的轻量级 Agent Runtime。�
   - 启动扫描 RUNNING Task / 加载最新 Checkpoint
   - 从下一 Node 恢复 / At-least-once Node Execution
 
+- [x] Milestone 6：Event + SSE
+  - Event / EventBus / SQLite Event Subscriber
+  - Task / Node / Tool 生命周期事件
+  - 历史事件回放 + 实时 SSE Stream
+
 ## 环境
 
 ```bash

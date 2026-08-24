@@ -1,6 +1,7 @@
 import asyncio
 from typing import Any
 
+from events import Event, EventBus, EventType
 from runtime.errors import RetryableToolError, ToolTimeout
 from tools.limiter import ToolLimiter
 from tools.registry import ToolRegistry
@@ -23,28 +24,86 @@ class ToolExecutor:
         registry: ToolRegistry,
         limiter: ToolLimiter | None = None,
         retry_policy: RetryPolicy | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.registry = registry
         self.limiter = limiter or ToolLimiter()
         self.retry_policy = retry_policy or RetryPolicy()
+        self.event_bus = event_bus
 
-    async def execute(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        tool = self.registry.get(tool_name)
-        async with self.limiter.acquire(tool_name, tool.max_concurrency):
-            for attempt in range(tool.max_retries + 1):
-                try:
-                    async with asyncio.timeout(tool.timeout) as timeout_scope:
-                        return await tool.execute(arguments)
-                except TimeoutError:
-                    # asyncio.timeout() 和工具/下游 SDK 都可能抛 TimeoutError。
-                    # 只有当前 timeout scope 确实到期时才能转换为 ToolTimeout；
-                    # 工具自身的 TimeoutError 必须保留，避免错误分类。
-                    if timeout_scope.expired():
-                        raise ToolTimeout(
-                            f"tool {tool.name!r} timed out after {tool.timeout}s"
-                        ) from None
-                    raise
-                except RetryableToolError:
-                    if attempt >= tool.max_retries:
+    async def execute(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        task_id: str | None = None,
+        node_id: str | None = None,
+    ) -> Any:
+        await self._publish(
+            task_id,
+            EventType.TOOL_STARTED,
+            node_id,
+            {"tool_name": tool_name},
+        )
+        try:
+            tool = self.registry.get(tool_name)
+            async with self.limiter.acquire(tool_name, tool.max_concurrency):
+                for attempt in range(tool.max_retries + 1):
+                    try:
+                        async with asyncio.timeout(tool.timeout) as timeout_scope:
+                            result = await tool.execute(arguments)
+                            break
+                    except TimeoutError:
+                        # asyncio.timeout() 和工具/下游 SDK 都可能抛 TimeoutError。
+                        # 只有当前 timeout scope 确实到期时才能转换为 ToolTimeout；
+                        # 工具自身的 TimeoutError 必须保留，避免错误分类。
+                        if timeout_scope.expired():
+                            raise ToolTimeout(
+                                f"tool {tool.name!r} timed out after {tool.timeout}s"
+                            ) from None
                         raise
-                    await self.retry_policy.sleep(attempt)
+                    except RetryableToolError as error:
+                        if attempt >= tool.max_retries:
+                            raise
+                        await self._publish(
+                            task_id,
+                            EventType.TOOL_RETRY,
+                            node_id,
+                            {
+                                "tool_name": tool_name,
+                                "attempt": attempt + 1,
+                                "error": str(error),
+                            },
+                        )
+                        await self.retry_policy.sleep(attempt)
+        except Exception as error:
+            await self._publish(
+                task_id,
+                EventType.TOOL_FAILED,
+                node_id,
+                {
+                    "tool_name": tool_name,
+                    "error": f"{type(error).__name__}: {error}",
+                },
+            )
+            raise
+
+        await self._publish(
+            task_id,
+            EventType.TOOL_COMPLETED,
+            node_id,
+            {"tool_name": tool_name, "result": result},
+        )
+        return result
+
+    async def _publish(
+        self,
+        task_id: str | None,
+        event_type: EventType,
+        node_id: str | None,
+        data: dict[str, Any],
+    ) -> None:
+        if self.event_bus is not None and task_id is not None:
+            await self.event_bus.publish(
+                Event.create(task_id, event_type, node_id=node_id, data=data)
+            )

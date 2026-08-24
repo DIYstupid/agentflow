@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from events.event import Event, EventType
+
 from storage.database import Database
 
 
@@ -22,6 +24,40 @@ class EventRepository:
 
     def __init__(self, database: Database) -> None:
         self.database = database
+
+    async def save(self, event: Event) -> None:
+        await self.database.execute(
+            """
+            INSERT INTO events (
+                event_id, task_id, event_type, node_id, data_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.event_id,
+                event.task_id,
+                event.event_type.value,
+                event.node_id,
+                json.dumps(event.data, ensure_ascii=False),
+                event.timestamp.isoformat(),
+            ),
+        )
+
+    async def list_events(self, task_id: str) -> list[Event]:
+        rows = await self.database.fetch_all(
+            "SELECT * FROM events WHERE task_id = ? ORDER BY created_at, rowid",
+            (task_id,),
+        )
+        return [
+            Event(
+                event_id=row["event_id"],
+                task_id=row["task_id"],
+                event_type=EventType(row["event_type"]),
+                node_id=row["node_id"],
+                data=json.loads(row["data_json"]),
+                timestamp=datetime.fromisoformat(row["created_at"]),
+            )
+            for row in rows
+        ]
 
     async def append(
         self,

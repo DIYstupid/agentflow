@@ -1,5 +1,6 @@
 from typing import Any
 
+from events import Event, EventBus, EventType
 from graph.executor import GraphExecutor
 from graph.graph import Graph
 from runtime.context import ExecutionContext
@@ -17,10 +18,12 @@ class TaskManager:
         scheduler: Scheduler | None = None,
         task_repository: TaskRepository | None = None,
         checkpoint_repository: CheckpointRepository | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self.scheduler = scheduler or Scheduler()
         self.task_repository = task_repository
         self.checkpoint_repository = checkpoint_repository
+        self.event_bus = event_bus
         self._tasks: dict[str, AgentTask] = {}
         self._contexts: dict[str, ExecutionContext] = {}
 
@@ -49,6 +52,9 @@ class TaskManager:
             task.current_node = node_id
             if self.task_repository is not None:
                 await self.task_repository.update(task)
+            await self._publish(
+                Event.create(task.task_id, EventType.NODE_STARTED, node_id=node_id)
+            )
 
         async def save_checkpoint(
             node_id: str,
@@ -59,24 +65,48 @@ class TaskManager:
                 await self.checkpoint_repository.save(
                     task.task_id, node_id, execution_context, next_node
                 )
+            await self._publish(
+                Event.create(
+                    task.task_id,
+                    EventType.NODE_COMPLETED,
+                    node_id=node_id,
+                    data={"output": execution_context.node_outputs[node_id]},
+                )
+            )
+
+        async def node_failed(node_id: str, error: Exception) -> None:
+            await self._publish(
+                Event.create(
+                    task.task_id,
+                    EventType.NODE_FAILED,
+                    node_id=node_id,
+                    data={"error": f"{type(error).__name__}: {error}"},
+                )
+            )
 
         async def run(execution_context: ExecutionContext) -> Any:
             return await executor.execute(
                 execution_context,
                 on_node_started=mark_node_started,
                 on_checkpoint=save_checkpoint,
+                on_node_failed=node_failed,
             )
 
         self._tasks[task.task_id] = task
         self._contexts[task.task_id] = context
         try:
+            await self._publish(
+                Event.create(
+                    task.task_id,
+                    EventType.TASK_CREATED,
+                    data={"graph_id": task.graph_id},
+                )
+            )
             await self.scheduler.submit(
                 task,
                 context,
                 run,
-                state_callback=self.task_repository.update
-                if self.task_repository is not None
-                else None,
+                state_callback=self._task_state_changed,
             )
         except Exception:
             self._tasks.pop(task.task_id, None)
@@ -113,6 +143,9 @@ class TaskManager:
             task.current_node = node_id
             if self.task_repository is not None:
                 await self.task_repository.update(task)
+            await self._publish(
+                Event.create(task.task_id, EventType.NODE_STARTED, node_id=node_id)
+            )
 
         async def save_checkpoint(
             node_id: str,
@@ -123,12 +156,31 @@ class TaskManager:
                 await self.checkpoint_repository.save(
                     task.task_id, node_id, execution_context, next_node
                 )
+            await self._publish(
+                Event.create(
+                    task.task_id,
+                    EventType.NODE_COMPLETED,
+                    node_id=node_id,
+                    data={"output": execution_context.node_outputs[node_id]},
+                )
+            )
+
+        async def node_failed(node_id: str, error: Exception) -> None:
+            await self._publish(
+                Event.create(
+                    task.task_id,
+                    EventType.NODE_FAILED,
+                    node_id=node_id,
+                    data={"error": f"{type(error).__name__}: {error}"},
+                )
+            )
 
         async def run(execution_context: ExecutionContext) -> Any:
             return await executor.execute(
                 execution_context,
                 on_node_started=mark_node_started,
                 on_checkpoint=save_checkpoint,
+                on_node_failed=node_failed,
                 start_node=start_node,
             )
 
@@ -142,9 +194,7 @@ class TaskManager:
                 task,
                 context,
                 run,
-                state_callback=self.task_repository.update
-                if self.task_repository is not None
-                else None,
+                state_callback=self._task_state_changed,
                 wait_for_capacity=True,
                 execution_timeout=execution_timeout,
             )
@@ -154,15 +204,41 @@ class TaskManager:
             raise
         return task
 
-    def attach_completed(
+    async def attach_completed(
         self, task: AgentTask, context: ExecutionContext
     ) -> AgentTask:
         if task.task_id in self._tasks:
             raise ValueError(f"task {task.task_id!r} is already managed")
         self._tasks[task.task_id] = task
         self._contexts[task.task_id] = context
+        await self._publish_task_status(task)
         task._done.set()
         return task
+
+    async def _task_state_changed(self, task: AgentTask) -> None:
+        if self.task_repository is not None:
+            await self.task_repository.update(task)
+        await self._publish_task_status(task)
+
+    async def _publish_task_status(self, task: AgentTask) -> None:
+        event_type = {
+            TaskStatus.RUNNING: EventType.TASK_STARTED,
+            TaskStatus.COMPLETED: EventType.TASK_COMPLETED,
+            TaskStatus.FAILED: EventType.TASK_FAILED,
+            TaskStatus.CANCELLED: EventType.TASK_CANCELLED,
+        }.get(task.status)
+        if event_type is None:
+            return
+        data: dict[str, Any] = {"status": task.status.value}
+        if task.output is not None:
+            data["output"] = task.output
+        if task.error is not None:
+            data["error"] = task.error
+        await self._publish(Event.create(task.task_id, event_type, data=data))
+
+    async def _publish(self, event: Event) -> None:
+        if self.event_bus is not None:
+            await self.event_bus.publish(event)
 
     def get(self, task_id: str) -> AgentTask | None:
         return self._tasks.get(task_id)

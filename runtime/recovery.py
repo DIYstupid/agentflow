@@ -75,7 +75,7 @@ class RecoveryManager:
                 task.error = None
                 task.completed_at = datetime.now(UTC)
                 await self.task_repository.update(task)
-                return self.task_manager.attach_completed(task, context)
+                return await self.task_manager.attach_completed(task, context)
 
         remaining_timeout = self._remaining_timeout(task)
         if remaining_timeout is not None and remaining_timeout <= 0:
@@ -147,7 +147,7 @@ class RecoveryManager:
         task.error = f"{error_type}: {message}"
         task.completed_at = datetime.now(UTC)
         await self.task_repository.update(task)
-        return self.task_manager.attach_completed(
+        return await self.task_manager.attach_completed(
             task,
             context
             or ExecutionContext(task_id=task.task_id, variables=dict(task.input)),
